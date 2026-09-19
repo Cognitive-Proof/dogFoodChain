@@ -1,7 +1,8 @@
 # dogFoodChain
 
-A governed, C2PA-signed JSONL append-only log. Design in
-[spec/schema.md](spec/schema.md); reference implementation in [src/](src).
+A governed, C2PA-signed JSONL append-only log. See the [FAQ](FAQ.md) for
+what this is and why; design in [spec/schema.md](spec/schema.md);
+reference implementation in [src/](src).
 
 A single writer appends blocks of transactions; a confirmer quorum (defined
 in the log's own genesis governance line) approves each block and, when
