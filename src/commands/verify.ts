@@ -2,7 +2,7 @@ import { replayChain } from '../chain';
 import { readLog } from '../log';
 
 export async function verify(logPath: string): Promise<void> {
-  const lines = readLog(logPath);
+  const lines = await readLog(logPath);
   const state = await replayChain(lines);
 
   console.log(`Chain ${state.chainId} — ${lines.length} line(s), ${state.blocks.length} block(s)`);

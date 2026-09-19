@@ -1,0 +1,46 @@
+x-node: &node
+  build: .
+  image: dogfoodchain-node:local
+
+services:
+  writer:
+    <<: *node
+    ports:
+      - "4101:4101"
+    environment:
+      DOGFOODCHAIN_PORT: "4101"
+      DOGFOODCHAIN_IDENTITY: writer
+      DOGFOODCHAIN_PEERS: "http://confirmer-b:4102,http://confirmer-c:4103"
+      DOGFOODCHAIN_LOG: /data/log.jsonl
+
+  confirmer-b:
+    <<: *node
+    ports:
+      - "4102:4102"
+    environment:
+      DOGFOODCHAIN_PORT: "4102"
+      DOGFOODCHAIN_IDENTITY: confirmer-b
+      DOGFOODCHAIN_PEERS: "http://writer:4101,http://confirmer-c:4103"
+      DOGFOODCHAIN_LOG: /data/log.jsonl
+
+  confirmer-c:
+    <<: *node
+    ports:
+      - "4103:4103"
+    environment:
+      DOGFOODCHAIN_PORT: "4103"
+      DOGFOODCHAIN_IDENTITY: confirmer-c
+      DOGFOODCHAIN_PEERS: "http://writer:4101,http://confirmer-b:4102"
+      DOGFOODCHAIN_LOG: /data/log.jsonl
+
+  # Talks to the nodes from your browser via their published localhost ports (4101-4103),
+  # not the compose-internal service names above — the UI's JS runs in your browser,
+  # outside the compose network, so it can't resolve "writer"/"confirmer-b"/etc.
+  ui:
+    build: ./ui
+    ports:
+      - "5173:5173"
+    depends_on:
+      - writer
+      - confirmer-b
+      - confirmer-c

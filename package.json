@@ -10,16 +10,22 @@
   "scripts": {
     "build": "tsc",
     "cli": "tsx src/cli.ts",
+    "ui": "npm --prefix ui run dev",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.all.json"
   },
   "dependencies": {
-    "c2pa-rs-javascript-library": "file:../c2pa-rs-javascript-library",
+    "@google-cloud/storage": "^8.2.0",
+    "c2pa-rs-javascript-library": "^0.2.9",
     "canonicalize": "^2.1.0",
     "commander": "^12.1.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.2",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.2",

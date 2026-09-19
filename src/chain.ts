@@ -11,6 +11,42 @@ export function requiredVotes(confirmerCount: number, threshold: number): number
   return Math.floor(confirmerCount * threshold) + 1;
 }
 
+export interface ChainStateSummary {
+  chainId: string;
+  tipSeq: number;
+  activeGovernance: {
+    seq: number;
+    writer: string;
+    confirmers: string[];
+    thresholds: { blockConfirmation: number; governanceChange: number };
+  };
+  pendingProposal: { seq: number; approvals: string[] } | null;
+  blocks: Array<{ seq: number; transactionCount: number; confirmed: boolean; approvals: string[] }>;
+}
+
+/** JSON-serializable view of a ChainState (Sets -> arrays), for an HTTP /state response. */
+export function summarizeState(state: ChainState): ChainStateSummary {
+  return {
+    chainId: state.chainId,
+    tipSeq: state.tipSeq,
+    activeGovernance: {
+      seq: state.activeGovernance.seq,
+      writer: state.activeGovernance.payload.writer.id,
+      confirmers: state.activeGovernance.payload.confirmers.map((c) => c.id),
+      thresholds: state.activeGovernance.payload.thresholds,
+    },
+    pendingProposal: state.pendingProposal
+      ? { seq: state.pendingProposal.seq, approvals: [...state.pendingProposal.approvals] }
+      : null,
+    blocks: state.blocks.map((b) => ({
+      seq: b.seq,
+      transactionCount: b.payload.transactions.length,
+      confirmed: b.confirmed,
+      approvals: [...b.approvals],
+    })),
+  };
+}
+
 export interface GovernanceRecord {
   seq: number;
   payload: GovernancePayload;

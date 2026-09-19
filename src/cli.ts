@@ -5,6 +5,8 @@ import { initGovernance } from './commands/initGovernance';
 import { sealBlock } from './commands/sealBlock';
 import { submitTransaction } from './commands/submitTransaction';
 import { verify } from './commands/verify';
+import { startNode } from './server';
+import type { IdentityRole } from './nodeConfig';
 
 const program = new Command();
 program.name('dogfoodchain').description('Reference implementation CLI for the dogFoodChain log');
@@ -12,7 +14,7 @@ program.name('dogfoodchain').description('Reference implementation CLI for the d
 program
   .command('init')
   .description('create a new log with a genesis governance line')
-  .argument('<log>', 'path to the JSONL log file to create')
+  .argument('<log>', 'JSONL log to create: a local file path, or gs://bucket/object.jsonl')
   .action(async (log: string) => {
     await initGovernance(log);
   });
@@ -58,6 +60,19 @@ program
   .argument('<log>')
   .action(async (log: string) => {
     await verify(log);
+  });
+
+program
+  .command('serve')
+  .description('run this process as a node: HTTP API + peer sync, so other nodes can share this chain')
+  .requiredOption('--port <port>', 'HTTP port to listen on', (v) => parseInt(v, 10))
+  .requiredOption('--log <path>', 'JSONL log for this node: a local file path, or gs://bucket/object.jsonl')
+  .option('--peers <urls>', 'comma-separated peer base URLs, e.g. http://localhost:4002,http://localhost:4003', (v) =>
+    v.split(',').map((s) => s.trim()).filter(Boolean)
+  )
+  .option('--identity <role>', 'writer|confirmer-b|confirmer-c — omit for a read-only relay node')
+  .action((opts: { port: number; log: string; peers?: string[]; identity?: IdentityRole }) => {
+    startNode({ port: opts.port, logPath: opts.log, peers: opts.peers ?? [], identityRole: opts.identity });
   });
 
 program.parseAsync(process.argv).catch((err) => {

@@ -24,14 +24,14 @@ export async function confirm(
   }
   const confirmer = identityFn();
 
-  const lines = readLog(logPath);
+  const lines = await readLog(logPath);
   const state = await replayChain(lines); // validates the log before we extend it
   const target = lines.find((l) => l.seq === targetSeq && l.lineType === targetLineType);
   if (!target) {
     throw new Error(`no ${targetLineType} line at seq ${targetSeq}`);
   }
 
-  const seq = nextSeq(logPath);
+  const seq = await nextSeq(logPath);
   const payload: ConfirmationPayload = {
     action: 'confirm',
     target: { lineType: targetLineType, seq: targetSeq },
@@ -41,7 +41,7 @@ export async function confirm(
   const { line } = await signLine('confirmation', seq, state.chainId, payload, confirmer, [
     { title: `line-${targetSeq}`, asset: payloadBytes(target.payload) },
   ]);
-  appendLine(logPath, line);
+  await appendLine(logPath, line);
 
   console.log(`${confirmer.id} ${vote}d ${targetLineType} seq ${targetSeq} (confirmation seq ${seq})`);
 }

@@ -9,7 +9,7 @@ import { pendingDirFor } from './submitTransaction';
 
 /** The writer batches pending off-chain transactions into a new block, chained to the tip. */
 export async function sealBlock(logPath: string): Promise<void> {
-  const lines = readLog(logPath);
+  const lines = await readLog(logPath);
   const state = await replayChain(lines);
 
   const writer = devIdentities.writer();
@@ -28,7 +28,7 @@ export async function sealBlock(logPath: string): Promise<void> {
     (f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as TransactionEntry
   );
 
-  const seq = nextSeq(logPath);
+  const seq = await nextSeq(logPath);
   const prevLine = lines[lines.length - 1];
   const payload: BlockPayload = {
     action: 'block',
@@ -40,7 +40,7 @@ export async function sealBlock(logPath: string): Promise<void> {
   const { line } = await signLine('block', seq, state.chainId, payload, writer, [
     { title: `line-${prevLine.seq}`, asset: payloadBytes(prevLine.payload) },
   ]);
-  appendLine(logPath, line);
+  await appendLine(logPath, line);
   rmSync(dir, { recursive: true, force: true });
 
   console.log(`Sealed block seq ${seq} with ${transactions.length} transaction(s)`);

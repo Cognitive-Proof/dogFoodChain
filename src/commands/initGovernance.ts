@@ -26,7 +26,7 @@ export async function initGovernance(logPath: string): Promise<void> {
   };
 
   const { line } = await signLine('governance', 0, chainId, payload, writer);
-  initLog(logPath, line);
+  await initLog(logPath, line);
   console.log(`Initialized ${logPath}`);
   console.log(`  chain:      ${chainId}`);
   console.log(`  writer:     ${writer.id}`);
