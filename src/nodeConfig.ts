@@ -18,4 +18,14 @@ export interface NodeConfig {
   identityRole?: IdentityRole;
   /** How often to pull from peers, in ms. Defaults to 2000. */
   syncIntervalMs?: number;
+  /** Interface to listen on. Defaults to 127.0.0.1; use 0.0.0.0 only behind a trusted network. */
+  host?: string;
+  /**
+   * Bearer token required by the endpoints that make this node sign something
+   * (`POST /transactions`, `/blocks/seal`, `/confirmations`). Required whenever
+   * `identityRole` is set.
+   */
+  apiToken?: string;
+  /** Browser origins allowed to call this node cross-origin (e.g. the dashboard). Defaults to none. */
+  corsOrigins?: string[];
 }

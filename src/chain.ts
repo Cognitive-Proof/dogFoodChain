@@ -1,9 +1,10 @@
-import { identifySigner, verifyLine } from './signing';
+import { identifySigner, lineHash, verifyLine, verifyTransaction } from './signing';
 import type {
   BlockPayload,
   ConfirmationPayload,
   GovernancePayload,
   LineEnvelope,
+  LineLink,
   ParticipantRef,
 } from './types';
 
@@ -72,6 +73,57 @@ export interface ChainState {
   blocks: BlockRecord[];
   /** seq of the furthest-along line processed (governance update or latest block). */
   tipSeq: number;
+  /** Every transaction id already included in a block — ids must be unique per chain. */
+  transactionIds: Set<string>;
+}
+
+/**
+ * Checks a line's signed `org.dogfoodchain.line` assertion against its unsigned envelope
+ * fields and against the actual previous line. This is what makes deleting, inserting,
+ * reordering or renumbering lines, or moving them to another chain, detectable.
+ */
+function checkLink(line: LineEnvelope, link: LineLink | undefined, prev: LineEnvelope | null): void {
+  const label = `line ${line.seq}`;
+  if (!link) throw new Error(`${label}: manifest has no signed org.dogfoodchain.line assertion`);
+  if (link.chainId !== line.chainId) throw new Error(`${label}: signed chainId does not match the envelope`);
+  if (link.seq !== line.seq) throw new Error(`${label}: signed seq ${link.seq} does not match the envelope`);
+  if (link.lineType !== line.lineType) throw new Error(`${label}: signed lineType does not match the envelope`);
+  const expected = prev ? lineHash(prev) : null;
+  if (link.prevHash !== expected) {
+    throw new Error(`${label}: signed prevHash does not match the previous line — the log was altered`);
+  }
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+/** Rejects governance that could never confirm anything, or would let anyone confirm. */
+function validateGovernance(seq: number, payload: GovernancePayload): void {
+  const label = `governance line ${seq}`;
+  if (!payload.writer || !isNonEmptyString(payload.writer.id) || !isNonEmptyString(payload.writer.certPem)) {
+    throw new Error(`${label}: writer must have an id and certPem`);
+  }
+  if (!Array.isArray(payload.confirmers) || payload.confirmers.length === 0) {
+    throw new Error(`${label}: confirmers must be a non-empty list`);
+  }
+  const ids = new Set<string>();
+  for (const c of payload.confirmers) {
+    if (!c || !isNonEmptyString(c.id) || !isNonEmptyString(c.certPem)) {
+      throw new Error(`${label}: every confirmer must have an id and certPem`);
+    }
+    if (ids.has(c.id)) throw new Error(`${label}: duplicate confirmer id "${c.id}"`);
+    ids.add(c.id);
+  }
+  for (const [name, value] of Object.entries(payload.thresholds ?? {})) {
+    // floor(N * t) + 1 <= N only while t < 1; a negative t would let a single vote pass.
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value >= 1) {
+      throw new Error(`${label}: threshold ${name} must be a number in [0, 1)`);
+    }
+  }
+  if (!payload.thresholds || !('blockConfirmation' in payload.thresholds) || !('governanceChange' in payload.thresholds)) {
+    throw new Error(`${label}: thresholds must include blockConfirmation and governanceChange`);
+  }
 }
 
 function governanceRecordFor(state: ChainState, seq: number): GovernanceRecord {
@@ -85,11 +137,9 @@ function governanceRecordFor(state: ChainState, seq: number): GovernanceRecord {
  * every governance/quorum rule as it goes. Throws on the first violation — this function
  * IS the spec (spec/schema.md) made executable.
  *
- * NOTE: this checks each line's own signature and the *declared* seq references
- * (governanceRef/prevBlockRef/target) for structural consistency, but does not yet
- * cross-check the C2PA ingredient hash recorded in a line's manifest against the actual
- * bytes of the line it claims to chain from. That's a follow-up hardening step — see
- * spec/schema.md's open items.
+ * Each line's signed link (see `checkLink`) must name the hash of the line before it, so
+ * any edit, deletion, insertion or reordering breaks verification of every later line.
+ * Dropping lines from the *end* of the log is not detectable from the log alone.
  */
 export async function replayChain(lines: LineEnvelope[]): Promise<ChainState> {
   if (lines.length === 0) throw new Error('empty log');
@@ -106,10 +156,13 @@ export async function replayChain(lines: LineEnvelope[]): Promise<ChainState> {
   // Genesis trust is deliberately external/social (see spec/schema.md) — we only check
   // that the declared writer's own cert actually produced this signature, not that the
   // writer is who they claim to be in the world.
+  validateGovernance(0, genesisPayload);
   const genesisCheck = await verifyLine(genesisLine, [genesisPayload.writer.certPem]);
   if (!genesisCheck.trusted) {
     throw new Error('genesis line failed to verify against its own declared writer cert');
   }
+  if (genesisLine.seq !== 0) throw new Error('line 0: genesis must have seq 0');
+  checkLink(genesisLine, genesisCheck.link, null);
 
   const state: ChainState = {
     chainId: genesisLine.chainId,
@@ -118,6 +171,7 @@ export async function replayChain(lines: LineEnvelope[]): Promise<ChainState> {
     pendingProposal: null,
     blocks: [],
     tipSeq: 0,
+    transactionIds: new Set(),
   };
 
   for (let i = 1; i < lines.length; i++) {
@@ -129,12 +183,13 @@ export async function replayChain(lines: LineEnvelope[]): Promise<ChainState> {
       throw new Error(`line ${i}: has seq ${line.seq} — the log must be contiguous`);
     }
 
+    const prev = lines[i - 1];
     if (line.lineType === 'governance') {
-      await applyGovernanceLine(state, line as LineEnvelope<GovernancePayload>);
+      await applyGovernanceLine(state, line as LineEnvelope<GovernancePayload>, prev);
     } else if (line.lineType === 'block') {
-      await applyBlockLine(state, line as LineEnvelope<BlockPayload>);
+      await applyBlockLine(state, line as LineEnvelope<BlockPayload>, prev);
     } else if (line.lineType === 'confirmation') {
-      await applyConfirmationLine(state, line as LineEnvelope<ConfirmationPayload>);
+      await applyConfirmationLine(state, line as LineEnvelope<ConfirmationPayload>, prev);
     } else {
       throw new Error(`line ${i}: unknown lineType`);
     }
@@ -145,7 +200,8 @@ export async function replayChain(lines: LineEnvelope[]): Promise<ChainState> {
 
 async function applyGovernanceLine(
   state: ChainState,
-  line: LineEnvelope<GovernancePayload>
+  line: LineEnvelope<GovernancePayload>,
+  prev: LineEnvelope
 ): Promise<void> {
   const payload = line.payload;
   if (payload.action !== 'update') {
@@ -163,16 +219,23 @@ async function applyGovernanceLine(
     );
   }
 
-  const signer = await identifySigner(line, state.activeGovernance.payload.confirmers);
-  if (!signer) {
+  validateGovernance(line.seq, payload);
+
+  const signed = await identifySigner(line, state.activeGovernance.payload.confirmers);
+  if (!signed) {
     throw new Error(`governance line ${line.seq}: not signed by a member of the current confirmer set`);
   }
+  checkLink(line, signed.link, prev);
 
   state.pendingProposal = { seq: line.seq, payload, approvals: new Set() };
   state.tipSeq = line.seq;
 }
 
-async function applyBlockLine(state: ChainState, line: LineEnvelope<BlockPayload>): Promise<void> {
+async function applyBlockLine(
+  state: ChainState,
+  line: LineEnvelope<BlockPayload>,
+  prev: LineEnvelope
+): Promise<void> {
   const payload = line.payload;
   if (payload.governanceRef.seq !== state.activeGovernance.seq) {
     throw new Error(
@@ -187,18 +250,45 @@ async function applyBlockLine(state: ChainState, line: LineEnvelope<BlockPayload
   }
 
   const writer: ParticipantRef = state.activeGovernance.payload.writer;
-  const signer = await identifySigner(line, [writer]);
-  if (!signer) {
+  const signed = await identifySigner(line, [writer]);
+  if (!signed) {
     throw new Error(`block ${line.seq}: not signed by the active governance's writer`);
   }
+  checkLink(line, signed.link, prev);
+  await checkTransactions(state, line);
 
   state.blocks.push({ seq: line.seq, payload, approvals: new Set(), confirmed: false });
   state.tipSeq = line.seq;
 }
 
+/**
+ * Every transaction must carry a valid signature from its declared submitter cert. A
+ * submitter id that names a chain participant must use that participant's cert, so a
+ * transaction can't claim to come from a writer or confirmer that never signed it.
+ */
+async function checkTransactions(state: ChainState, line: LineEnvelope<BlockPayload>): Promise<void> {
+  const { writer, confirmers } = state.activeGovernance.payload;
+  const participants = new Map<string, string>([[writer.id, writer.certPem]]);
+  for (const c of confirmers) participants.set(c.id, c.certPem);
+
+  for (const tx of line.payload.transactions) {
+    const label = `block ${line.seq}: transaction ${tx.id}`;
+    if (state.transactionIds.has(tx.id)) throw new Error(`${label}: duplicate transaction id`);
+    const participantCert = participants.get(tx.submitter.id);
+    if (participantCert !== undefined && participantCert !== tx.submitter.certPem) {
+      throw new Error(`${label}: submitter "${tx.submitter.id}" does not use that participant's cert`);
+    }
+    if (!(await verifyTransaction(tx, [tx.submitter.certPem]))) {
+      throw new Error(`${label}: signature does not verify against the submitter's cert`);
+    }
+    state.transactionIds.add(tx.id);
+  }
+}
+
 async function applyConfirmationLine(
   state: ChainState,
-  line: LineEnvelope<ConfirmationPayload>
+  line: LineEnvelope<ConfirmationPayload>,
+  prev: LineEnvelope
 ): Promise<void> {
   const payload = line.payload;
 
@@ -208,11 +298,12 @@ async function applyConfirmationLine(
       throw new Error(`confirmation ${line.seq}: target block ${payload.target.seq} not found`);
     }
     const governance = governanceRecordFor(state, block.payload.governanceRef.seq);
-    const signer = await identifySigner(line, governance.payload.confirmers);
-    if (!signer) {
+    const signed = await identifySigner(line, governance.payload.confirmers);
+    if (!signed) {
       throw new Error(`confirmation ${line.seq}: not signed by a confirmer of the block's governance`);
     }
-    if (payload.vote === 'approve') block.approvals.add(signer.id);
+    checkLink(line, signed.link, prev);
+    if (payload.vote === 'approve') block.approvals.add(signed.signer.id);
     const required = requiredVotes(governance.payload.confirmers.length, governance.payload.thresholds.blockConfirmation);
     block.confirmed = block.approvals.size >= required;
     return;
@@ -224,11 +315,12 @@ async function applyConfirmationLine(
       `confirmation ${line.seq}: no pending governance proposal at seq ${payload.target.seq}`
     );
   }
-  const signer = await identifySigner(line, state.activeGovernance.payload.confirmers);
-  if (!signer) {
+  const signed = await identifySigner(line, state.activeGovernance.payload.confirmers);
+  if (!signed) {
     throw new Error(`confirmation ${line.seq}: not signed by a confirmer of the prior (active) governance`);
   }
-  if (payload.vote === 'approve') state.pendingProposal.approvals.add(signer.id);
+  checkLink(line, signed.link, prev);
+  if (payload.vote === 'approve') state.pendingProposal.approvals.add(signed.signer.id);
 
   const required = requiredVotes(
     state.activeGovernance.payload.confirmers.length,

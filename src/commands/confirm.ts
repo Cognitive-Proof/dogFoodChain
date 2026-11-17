@@ -38,7 +38,7 @@ export async function confirm(
     vote,
   };
 
-  const { line } = await signLine('confirmation', seq, state.chainId, payload, confirmer, [
+  const { line } = await signLine('confirmation', seq, state.chainId, payload, confirmer, lines[lines.length - 1], [
     { title: `line-${targetSeq}`, asset: payloadBytes(target.payload) },
   ]);
   await appendLine(logPath, line);

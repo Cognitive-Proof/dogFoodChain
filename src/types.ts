@@ -53,6 +53,25 @@ export interface ConfirmationPayload {
 
 export type LinePayload = GovernancePayload | BlockPayload | ConfirmationPayload;
 
+/**
+ * Signed into every line's manifest as the `org.dogfoodchain.line` assertion: binds the
+ * envelope fields that sit outside `payload`, and the hash of the line before this one.
+ */
+export interface LineLink {
+  chainId: string;
+  seq: number;
+  lineType: LineType;
+  /** base64 SHA-256 of the previous line (see `lineHash`); null only for genesis. */
+  prevHash: string | null;
+}
+
+/** Signed into a transaction's manifest as the `org.dogfoodchain.transaction` assertion. */
+export interface TransactionLink {
+  id: string;
+  submittedAt: string;
+  submitterId: string;
+}
+
 /** One line of the JSONL log. `manifest` is base64 C2PA sidecar bytes signing `payload`. */
 export interface LineEnvelope<T extends LinePayload = LinePayload> {
   lineType: LineType;

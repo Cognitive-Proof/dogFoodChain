@@ -12,7 +12,10 @@ if [ ! -f "$LOG_PATH" ]; then
   cp /app/fixtures/docker-genesis.jsonl "$LOG_PATH"
 fi
 
-set -- node dist/cli.js serve --port "$DOGFOODCHAIN_PORT" --log "$LOG_PATH" --peers "$DOGFOODCHAIN_PEERS"
+# Listen on all interfaces inside the container; docker-compose.yml publishes the
+# port on the host's loopback only. The API token is read from DOGFOODCHAIN_API_TOKEN.
+set -- node dist/cli.js serve --port "$DOGFOODCHAIN_PORT" --log "$LOG_PATH" --peers "$DOGFOODCHAIN_PEERS" \
+  --host 0.0.0.0 --cors-origin "${DOGFOODCHAIN_CORS_ORIGINS:-http://localhost:5173}"
 if [ -n "${DOGFOODCHAIN_IDENTITY:-}" ]; then
   set -- "$@" --identity "$DOGFOODCHAIN_IDENTITY"
 fi

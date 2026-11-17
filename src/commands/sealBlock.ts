@@ -37,9 +37,12 @@ export async function sealBlock(logPath: string): Promise<void> {
     transactions,
   };
 
-  const { line } = await signLine('block', seq, state.chainId, payload, writer, [
+  const { line } = await signLine('block', seq, state.chainId, payload, writer, prevLine, [
     { title: `line-${prevLine.seq}`, asset: payloadBytes(prevLine.payload) },
   ]);
+  // A bad pending transaction would otherwise be sealed into a block that no verifier
+  // (including this node's next replay) accepts.
+  await replayChain([...lines, line]);
   await appendLine(logPath, line);
   rmSync(dir, { recursive: true, force: true });
 
