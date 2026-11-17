@@ -2,34 +2,39 @@ x-node: &node
   build: .
   image: dogfoodchain-node:local
 
+# Signing endpoints need a bearer token. The demo shares one token across all three
+# nodes; set it before `docker compose up` and paste it into the dashboard.
 services:
   writer:
     <<: *node
     ports:
-      - "4101:4101"
+      - "127.0.0.1:4101:4101"
     environment:
       DOGFOODCHAIN_PORT: "4101"
       DOGFOODCHAIN_IDENTITY: writer
+      DOGFOODCHAIN_API_TOKEN: ${DOGFOODCHAIN_API_TOKEN:?set DOGFOODCHAIN_API_TOKEN before docker compose up}
       DOGFOODCHAIN_PEERS: "http://confirmer-b:4102,http://confirmer-c:4103"
       DOGFOODCHAIN_LOG: /data/log.jsonl
 
   confirmer-b:
     <<: *node
     ports:
-      - "4102:4102"
+      - "127.0.0.1:4102:4102"
     environment:
       DOGFOODCHAIN_PORT: "4102"
       DOGFOODCHAIN_IDENTITY: confirmer-b
+      DOGFOODCHAIN_API_TOKEN: ${DOGFOODCHAIN_API_TOKEN:?set DOGFOODCHAIN_API_TOKEN before docker compose up}
       DOGFOODCHAIN_PEERS: "http://writer:4101,http://confirmer-c:4103"
       DOGFOODCHAIN_LOG: /data/log.jsonl
 
   confirmer-c:
     <<: *node
     ports:
-      - "4103:4103"
+      - "127.0.0.1:4103:4103"
     environment:
       DOGFOODCHAIN_PORT: "4103"
       DOGFOODCHAIN_IDENTITY: confirmer-c
+      DOGFOODCHAIN_API_TOKEN: ${DOGFOODCHAIN_API_TOKEN:?set DOGFOODCHAIN_API_TOKEN before docker compose up}
       DOGFOODCHAIN_PEERS: "http://writer:4101,http://confirmer-b:4102"
       DOGFOODCHAIN_LOG: /data/log.jsonl
 
@@ -39,7 +44,7 @@ services:
   ui:
     build: ./ui
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       - writer
       - confirmer-b

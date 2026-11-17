@@ -71,9 +71,32 @@ program
     v.split(',').map((s) => s.trim()).filter(Boolean)
   )
   .option('--identity <role>', 'writer|confirmer-b|confirmer-c — omit for a read-only relay node')
-  .action((opts: { port: number; log: string; peers?: string[]; identity?: IdentityRole }) => {
-    startNode({ port: opts.port, logPath: opts.log, peers: opts.peers ?? [], identityRole: opts.identity });
-  });
+  .option('--host <host>', 'interface to listen on', '127.0.0.1')
+  .option('--api-token <token>', 'bearer token for signing endpoints (default: $DOGFOODCHAIN_API_TOKEN)')
+  .option('--cors-origin <origins>', 'comma-separated browser origins allowed to call this node', (v) =>
+    v.split(',').map((s) => s.trim()).filter(Boolean)
+  )
+  .action(
+    (opts: {
+      port: number;
+      log: string;
+      peers?: string[];
+      identity?: IdentityRole;
+      host: string;
+      apiToken?: string;
+      corsOrigin?: string[];
+    }) => {
+      startNode({
+        port: opts.port,
+        logPath: opts.log,
+        peers: opts.peers ?? [],
+        identityRole: opts.identity,
+        host: opts.host,
+        apiToken: opts.apiToken ?? process.env.DOGFOODCHAIN_API_TOKEN,
+        corsOrigins: opts.corsOrigin,
+      });
+    }
+  );
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);

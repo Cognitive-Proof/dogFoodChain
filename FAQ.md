@@ -20,7 +20,7 @@ Each chain starts with a genesis line that names one *writer* (the only identity
 
 **How is it tamper-evident?**
 
-Every entry is a real C2PA manifest, ingredient-chained to the entry before it — the same mechanism C2PA already uses to bind a derived asset to its parent. Altering or reordering history breaks that chain and is immediately detectable by any participant, without needing to trust whoever wrote it.
+Every entry is a real C2PA manifest, and each manifest carries a signed hash of the entry before it, so altering, deleting or reordering history breaks that chain and is detectable by any participant, without needing to trust whoever wrote it. Cutting entries off the end of a copy is the exception: spotting that needs another participant's copy to compare against.
 
 **Is this a blockchain?**
 

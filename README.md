@@ -49,6 +49,9 @@ see spec/schema.md on why genesis trust is deliberately outside the
 protocol. Once each participant has the same genesis line in their own log
 file:
 
+Each signing node needs an API token (see below); export
+`DOGFOODCHAIN_API_TOKEN` in each terminal first.
+
 ```bash
 # Terminal 1 — the writer's node
 npx tsx src/cli.ts serve --port 4101 --log writer.jsonl \
@@ -69,13 +72,22 @@ Each node exposes: `GET /health`, `GET /log[?since=N]`, `GET /state`,
 without `--identity` is a read-only relay — it still validates, stores, and
 forwards lines, it just can't sign new ones.
 
+Nodes listen on `127.0.0.1` unless you pass `--host`. The three endpoints that
+sign with the node's key (`/transactions`, `/blocks/seal`, `/confirmations`)
+require `Authorization: Bearer <token>`, set with `--api-token` or
+`DOGFOODCHAIN_API_TOKEN`; a node with `--identity` refuses to start without
+one. Browsers may call a node cross-origin only from origins listed in
+`--cors-origin`.
+
 ```bash
-curl -X POST localhost:4101/transactions -H 'Content-Type: application/json' \
+export DOGFOODCHAIN_API_TOKEN=change-me   # set in each node's terminal before `serve`
+AUTH="Authorization: Bearer $DOGFOODCHAIN_API_TOKEN"
+curl -X POST localhost:4101/transactions -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"msg":"hello"}'
-curl -X POST localhost:4101/blocks/seal
-curl -X POST localhost:4102/confirmations -H 'Content-Type: application/json' \
+curl -X POST localhost:4101/blocks/seal -H "$AUTH"
+curl -X POST localhost:4102/confirmations -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"targetType":"block","targetSeq":1,"vote":"approve"}'
-curl -X POST localhost:4103/confirmations -H 'Content-Type: application/json' \
+curl -X POST localhost:4103/confirmations -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"targetType":"block","targetSeq":1,"vote":"approve"}'
 curl localhost:4101/state   # same state on 4102 and 4103 once sync catches up
 ```
@@ -156,9 +168,14 @@ Boots three nodes (writer, confirmer-b, confirmer-c) and the UI, all wired
 together, no local Node/npm setup required beyond Docker itself:
 
 ```bash
+export DOGFOODCHAIN_API_TOKEN=change-me
 docker compose up -d
 open http://localhost:5173   # UI, defaults to the writer's node
 ```
+
+The demo shares one API token across all three nodes; paste it into the UI's
+"API token" field to submit, seal or confirm. Ports are published on
+`127.0.0.1` only.
 
 - `writer` → `localhost:4101`, `confirmer-b` → `localhost:4102`,
   `confirmer-c` → `localhost:4103`. Nodes talk to each other over the

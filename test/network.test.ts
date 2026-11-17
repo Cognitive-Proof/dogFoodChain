@@ -20,6 +20,8 @@ const PORT_CONFIRMER_C = 4103;
 const URL_WRITER = `http://localhost:${PORT_WRITER}`;
 const URL_CONFIRMER_B = `http://localhost:${PORT_CONFIRMER_B}`;
 const URL_CONFIRMER_C = `http://localhost:${PORT_CONFIRMER_C}`;
+const API_TOKEN = 'network-test-token';
+const AUTH = { Authorization: `Bearer ${API_TOKEN}` };
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5000, intervalMs = 100): Promise<void> {
   const start = Date.now();
@@ -52,7 +54,7 @@ describe('three independent nodes sharing one chain over HTTP', () => {
       ],
       thresholds: { blockConfirmation: 0.5, governanceChange: 0.667 },
     };
-    const { line: genesisLine } = await signLine('governance', 0, 'urn:uuid:network-test', genesisPayload, writer);
+    const { line: genesisLine } = await signLine('governance', 0, 'urn:uuid:network-test', genesisPayload, writer, null);
     const genesisText = JSON.stringify(genesisLine) + '\n';
 
     const logWriter = join(dir, 'writer.jsonl');
@@ -70,6 +72,8 @@ describe('three independent nodes sharing one chain over HTTP', () => {
       logPath: logWriter,
       peers: [URL_CONFIRMER_B, URL_CONFIRMER_C],
       identityRole: 'writer',
+      apiToken: API_TOKEN,
+      corsOrigins: ['http://localhost:5173'],
       syncIntervalMs,
     });
     const nodeConfirmerB = startNode({
@@ -77,6 +81,7 @@ describe('three independent nodes sharing one chain over HTTP', () => {
       logPath: logConfirmerB,
       peers: [URL_WRITER, URL_CONFIRMER_C],
       identityRole: 'confirmer-b',
+      apiToken: API_TOKEN,
       syncIntervalMs,
     });
     const nodeConfirmerC = startNode({
@@ -84,6 +89,7 @@ describe('three independent nodes sharing one chain over HTTP', () => {
       logPath: logConfirmerC,
       peers: [URL_WRITER, URL_CONFIRMER_B],
       identityRole: 'confirmer-c',
+      apiToken: API_TOKEN,
       syncIntervalMs,
     });
     nodes = [nodeWriter, nodeConfirmerB, nodeConfirmerC];
@@ -97,17 +103,48 @@ describe('three independent nodes sharing one chain over HTTP', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test('signing endpoints refuse requests without the API token', async () => {
+    for (const headers of [{}, { Authorization: 'Bearer wrong-token' }] as Record<string, string>[]) {
+      const res = await fetch(`${URL_CONFIRMER_B}/confirmations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ targetType: 'block', targetSeq: 1, vote: 'approve' }),
+      });
+      expect(res.status).toBe(401);
+    }
+    expect((await fetch(`${URL_WRITER}/blocks/seal`, { method: 'POST' })).status).toBe(401);
+    expect((await fetch(`${URL_WRITER}/transactions`, { method: 'POST' })).status).toBe(401);
+  });
+
+  test('CORS is granted only to configured origins', async () => {
+    const preflight = (origin: string) =>
+      fetch(`${URL_WRITER}/transactions`, {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      });
+    expect((await preflight('http://localhost:5173')).headers.get('access-control-allow-origin')).toBe(
+      'http://localhost:5173'
+    );
+    expect((await preflight('https://evil.example')).headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  test('a node with a signing identity will not start without an API token', () => {
+    expect(() => startNode({ port: 4199, logPath: join(dir, 'x.jsonl'), peers: [], identityRole: 'writer' })).toThrow(
+      /API token/
+    );
+  });
+
   test('a transaction submitted to the writer node ends up confirmed and identical on all three nodes', async () => {
     // 1. Submit a transaction directly to the writer's own node.
     const submitRes = await fetch(`${URL_WRITER}/transactions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AUTH },
       body: JSON.stringify({ msg: 'hello from a 3-node network' }),
     });
     expect(submitRes.ok).toBe(true);
 
     // 2. The writer seals a block from its own pending pool.
-    const sealRes = await fetch(`${URL_WRITER}/blocks/seal`, { method: 'POST' });
+    const sealRes = await fetch(`${URL_WRITER}/blocks/seal`, { method: 'POST', headers: AUTH });
     expect(sealRes.ok).toBe(true);
 
     // 3. Wait until BOTH confirmer nodes have independently received the block via sync
@@ -121,14 +158,14 @@ describe('three independent nodes sharing one chain over HTTP', () => {
     //    its own key (the writer's node has no access to either confirmer's private key).
     const confirmBRes = await fetch(`${URL_CONFIRMER_B}/confirmations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AUTH },
       body: JSON.stringify({ targetType: 'block', targetSeq: 1, vote: 'approve' }),
     });
     expect(confirmBRes.ok).toBe(true);
 
     const confirmCRes = await fetch(`${URL_CONFIRMER_C}/confirmations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AUTH },
       body: JSON.stringify({ targetType: 'block', targetSeq: 1, vote: 'approve' }),
     });
     expect(confirmCRes.ok).toBe(true);

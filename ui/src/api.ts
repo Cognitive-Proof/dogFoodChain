@@ -49,27 +49,32 @@ export function getLog(nodeUrl: string): Promise<LineEnvelope[]> {
   return fetch(`${nodeUrl}/log`).then((r) => asJson(r));
 }
 
-export function submitTransaction(nodeUrl: string, data: unknown): Promise<{ ok: true }> {
+function authHeaders(apiToken: string): Record<string, string> {
+  return { Authorization: `Bearer ${apiToken}` };
+}
+
+export function submitTransaction(nodeUrl: string, apiToken: string, data: unknown): Promise<{ ok: true }> {
   return fetch(`${nodeUrl}/transactions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(apiToken) },
     body: JSON.stringify(data),
   }).then((r) => asJson(r));
 }
 
-export function sealBlock(nodeUrl: string): Promise<{ ok: true }> {
-  return fetch(`${nodeUrl}/blocks/seal`, { method: 'POST' }).then((r) => asJson(r));
+export function sealBlock(nodeUrl: string, apiToken: string): Promise<{ ok: true }> {
+  return fetch(`${nodeUrl}/blocks/seal`, { method: 'POST', headers: authHeaders(apiToken) }).then((r) => asJson(r));
 }
 
 export function confirmTarget(
   nodeUrl: string,
+  apiToken: string,
   targetType: 'block' | 'governance',
   targetSeq: number,
   vote: 'approve' | 'reject' = 'approve'
 ): Promise<{ ok: true }> {
   return fetch(`${nodeUrl}/confirmations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(apiToken) },
     body: JSON.stringify({ targetType, targetSeq, vote }),
   }).then((r) => asJson(r));
 }

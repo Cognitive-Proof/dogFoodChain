@@ -1,5 +1,6 @@
+import { timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
-import express, { type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { summarizeState, replayChain } from './chain';
 import { confirm } from './commands/confirm';
 import { sealBlock } from './commands/sealBlock';
@@ -23,12 +24,31 @@ function sendCommandError(res: Response, err: unknown): void {
   res.status(err instanceof ConcurrentWriteError ? 409 : 400).json({ error: message });
 }
 
+function tokenMatches(header: string | undefined, token: string): boolean {
+  const presented = Buffer.from(header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : '');
+  const expected = Buffer.from(token);
+  return presented.length === expected.length && timingSafeEqual(presented, expected);
+}
+
+/** Guards endpoints that sign with this node's key: without it, anyone who can reach the
+ *  node (including any web page its operator has open) could cast its votes. */
+function requireApiToken(config: NodeConfig) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!config.apiToken || !tokenMatches(req.get('authorization'), config.apiToken)) {
+      res.status(401).json({ error: 'missing or invalid API token' });
+      return;
+    }
+    next();
+  };
+}
+
 export function createServer(config: NodeConfig) {
   const app = express();
-  // Permissive CORS: this is a local reference-implementation node, not a production
-  // service, and the point is to let a locally-run UI (or curl, or a peer) hit it freely.
-  app.use(cors());
+  // Peers sync server-to-server and need no CORS; only listed browser origins (the
+  // dashboard) may call this node cross-origin.
+  app.use(cors({ origin: config.corsOrigins ?? [] }));
   app.use(express.json());
+  const signing = requireApiToken(config);
 
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ ok: true, identity: config.identityRole ?? null, peers: config.peers });
@@ -56,7 +76,7 @@ export function createServer(config: NodeConfig) {
     res.json({ outcome });
   });
 
-  app.post('/transactions', async (req: Request, res: Response) => {
+  app.post('/transactions', signing, async (req: Request, res: Response) => {
     if (!config.identityRole) {
       res.status(403).json({ error: 'this node has no signing identity configured (read-only relay)' });
       return;
@@ -69,7 +89,7 @@ export function createServer(config: NodeConfig) {
     }
   });
 
-  app.post('/blocks/seal', async (_req: Request, res: Response) => {
+  app.post('/blocks/seal', signing, async (_req: Request, res: Response) => {
     if (config.identityRole !== 'writer') {
       res.status(403).json({ error: 'only a node configured with the writer identity can seal blocks' });
       return;
@@ -83,7 +103,7 @@ export function createServer(config: NodeConfig) {
     }
   });
 
-  app.post('/confirmations', async (req: Request, res: Response) => {
+  app.post('/confirmations', signing, async (req: Request, res: Response) => {
     if (config.identityRole !== 'confirmer-b' && config.identityRole !== 'confirmer-c') {
       res.status(403).json({ error: 'this node has no confirmer identity configured' });
       return;
@@ -106,10 +126,14 @@ export function createServer(config: NodeConfig) {
 }
 
 export function startNode(config: NodeConfig) {
+  if (config.identityRole && !config.apiToken) {
+    throw new Error('a node with a signing identity needs an API token (--api-token or DOGFOODCHAIN_API_TOKEN)');
+  }
   const app = createServer(config);
-  const server = app.listen(config.port, () => {
+  const host = config.host ?? '127.0.0.1';
+  const server = app.listen(config.port, host, () => {
     console.log(
-      `dogFoodChain node listening on :${config.port}` +
+      `dogFoodChain node listening on ${host}:${config.port}` +
         (config.identityRole ? ` as ${config.identityRole}` : ' (relay, no signing identity)') +
         (config.peers.length ? `, peers: ${config.peers.join(', ')}` : ', no peers configured')
     );

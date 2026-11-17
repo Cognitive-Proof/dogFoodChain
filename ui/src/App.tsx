@@ -13,6 +13,28 @@ import {
 import JsonModal from './JsonModal';
 
 const NODE_URL_KEY = 'dogfoodchain.nodeUrl';
+const API_TOKEN_KEY = 'dogfoodchain.apiToken';
+
+// sessionStorage, not localStorage: the token lets this tab sign as the node, so it
+// shouldn't outlive the tab.
+function useApiToken(): [string, (token: string) => void] {
+  const [token, setToken] = useState(() => {
+    try {
+      return sessionStorage.getItem(API_TOKEN_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const update = (next: string) => {
+    setToken(next);
+    try {
+      sessionStorage.setItem(API_TOKEN_KEY, next);
+    } catch {
+      // Storage unavailable: keep the token in memory only.
+    }
+  };
+  return [token, update];
+}
 
 function useNodeUrl(): [string, (url: string) => void] {
   const [url, setUrl] = useState(() => localStorage.getItem(NODE_URL_KEY) ?? 'http://localhost:4101');
@@ -25,6 +47,7 @@ function useNodeUrl(): [string, (url: string) => void] {
 
 export default function App() {
   const [nodeUrl, setNodeUrl] = useNodeUrl();
+  const [apiToken, setApiToken] = useApiToken();
   const [health, setHealth] = useState<{ identity: string | null; peers: string[] } | null>(null);
   const [state, setState] = useState<ChainStateSummary | null>(null);
   const [log, setLog] = useState<LineEnvelope[]>([]);
@@ -56,8 +79,8 @@ export default function App() {
     setSending(true);
     setActionError(null);
     try {
-      await submitTransaction(nodeUrl, { msg: 'test transaction', sentAt: new Date().toISOString() });
-      await sealBlock(nodeUrl);
+      await submitTransaction(nodeUrl, apiToken, { msg: 'test transaction', sentAt: new Date().toISOString() });
+      await sealBlock(nodeUrl, apiToken);
       await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -70,7 +93,7 @@ export default function App() {
     setConfirmingSeq(seq);
     setActionError(null);
     try {
-      await confirmTarget(nodeUrl, 'block', seq, 'approve');
+      await confirmTarget(nodeUrl, apiToken, 'block', seq, 'approve');
       await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -90,6 +113,14 @@ export default function App() {
           value={nodeUrl}
           onChange={(e) => setNodeUrl(e.target.value)}
           placeholder="http://localhost:4101"
+        />
+        <label htmlFor="api-token">API token</label>
+        <input
+          id="api-token"
+          type="password"
+          value={apiToken}
+          onChange={(e) => setApiToken(e.target.value)}
+          placeholder="needed to submit, seal or confirm"
         />
         <button onClick={refresh}>Refresh</button>
         {connectionError && <p className="error">Can't reach {nodeUrl}: {connectionError}</p>}
